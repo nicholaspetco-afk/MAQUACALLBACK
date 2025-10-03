@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>維修回訪報告</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="report-page">
+  <header class="header">
+    <img src="/assets/12731758007267_.pic_hd.jpg" alt="MAQUA 服務小回顧" class="banner">
+  </header>
+
+  <main class="container">
+    <section class="service-feedback-section">
+      <h1 class="main-title">服務小回顧</h1>
+      <p class="description">今天已經幫您完成這次的保養維護，設備狀態一切良好，<br>請安心使用～</p>
+      <p class="description">感謝一直以來讓我們陪伴在您身邊！</p>
+    </section>
+
+    <div class="service-dates-section">
+      <div class="date-buttons">
+        <div class="date-button current-service">
+          <div class="date-label">本次服務</div>
+          <div class="date-value" id="serviceDateValue">—</div>
+        </div>
+        <div class="date-button next-service">
+          <div class="date-label">下次服務</div>
+          <div class="date-value" id="nextDateValue">—</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="slidesContainer" class="slides-wrapper"></div>
+
+    <div class="maintenance-info">
+      <div class="feedback-container">
+        <p class="feedback-text">我們會不斷優化服務，懇請你向我們大膽評價！</p>
+        <a class="feedback-button" href="https://docs.google.com/forms/d/e/1FAIpQLScMmKwrMvHjSqXLYyQ5U0H35kjIdVmjrrGnFCLdl6i7aP097Q/viewform?pli=1" target="_blank" rel="noopener">點此按鈕進行評價</a>
+      </div>
+
+      <div class="reminder-section">
+        <button class="reminder-btn">使用情況小教學</button>
+      </div>
+
+      <div class="video-thumbnails">
+        <div class="video-item" onclick="showVideoOverlay('/assets/1252_1757912418.mp4')">
+          <div class="video-thumbnail" style="background-image: url('/assets/13221758271666_.pic_hd.jpg');"></div>
+        </div>
+        <div class="video-item" onclick="showVideoOverlay('/assets/1253_1757912439.mp4')">
+          <div class="video-thumbnail" style="background-image: url('/assets/13201758270327_.pic_hd.jpg');"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="uploaded-design-image">
+      <img src="/assets/13191758269431_.pic_hd.jpg" alt="完整設計圖" style="width: 100%; height: auto; display: block;">
+    </div>
+  </main>
+
+  <div id="videoOverlay" onclick="hideVideoOverlay(event)" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center;">
+    <video id="overlayVideo" controls playsinline style="max-width: 90%; max-height: 90%;"></video>
+  </div>
+
+  <div id="imageOverlay" onclick="hideOverlay()">
+    <img id="overlayImg" src="" alt="放大圖片">
+  </div>
+
+  <script>
+    const slidesContainer = document.getElementById('slidesContainer');
+    const serviceDateEl = document.getElementById('serviceDateValue');
+    const nextDateEl = document.getElementById('nextDateValue');
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const params = new URLSearchParams(window.location.search);
+      const customerCode = params.get('customerCode');
+      const recordIndex = Number.parseInt(params.get('record') || '0', 10) || 0;
+      if (!customerCode) {
+        renderError('網址缺少客戶編碼。');
+        return;
+      }
+
+      let payload = null;
+      try {
+        const cached = sessionStorage.getItem('reportData');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && parsed.customerCode === customerCode) {
+            payload = parsed;
+          }
+        }
+      } catch (error) {
+        console.warn('讀取暫存報告資料失敗：', error);
+      }
+
+      if (!payload) {
+        try {
+          const response = await fetch(`/api/customers/${encodeURIComponent(customerCode)}/followups`);
+          if (!response.ok) {
+            throw new Error(`查詢失敗 (${response.status})`);
+          }
+          payload = await response.json();
+        } catch (error) {
+          console.error(error);
+          renderError('無法取得回訪資料，請稍後再試。');
+          return;
+        }
+      }
+
+      if (!payload || !Array.isArray(payload.records) || payload.records.length === 0) {
+        renderError('查無回訪資料。');
+        return;
+      }
+
+      const record = payload.records[Math.min(recordIndex, payload.records.length - 1)];
+      const manualService = params.get('serviceDate');
+      const manualNext = params.get('nextServiceDate');
+      const summary = payload.summary || {};
+      const latest = manualService || record.serviceDate || summary.latestServiceDate;
+      const next = manualNext || record.nextServiceDate || summary.nextServiceDate || summary.previousServiceDate;
+      updateDates(latest, next);
+      renderImages(record.photos || record.files || []);
+    });
+
+    function renderImages(files) {
+      slidesContainer.innerHTML = '';
+      const photos = (files || []).filter(isImageFile);
+      const targets = photos.length ? photos : files;
+      const list = Array.isArray(targets) ? targets : [];
+      if (!list.length) {
+        slidesContainer.innerHTML = '<p>此紀錄沒有附件。</p>';
+        return;
+      }
+      list.forEach(file => {
+        const slide = document.createElement('div');
+        slide.className = 'slide';
+        const img = document.createElement('img');
+        img.alt = file.fileName || '附件圖片';
+        img.loading = 'lazy';
+        if (file.fileUrl) {
+          img.src = file.fileUrl;
+          img.addEventListener('click', () => showOverlay(file.fileUrl));
+        } else {
+          img.className = 'placeholder';
+          img.alt = `${file.fileName || '附件'}（暫無預覽連結）`;
+        }
+        slide.appendChild(img);
+        slidesContainer.appendChild(slide);
+      });
+    }
+
+    function isImageFile(file) {
+      if (!file) return false;
+      const name = String(file.fileName || file.name || '').toLowerCase();
+      const ext = String(file.fileExtension || '').toLowerCase();
+      return [name, ext].some(value =>
+        value.endsWith('.jpg') ||
+        value.endsWith('.jpeg') ||
+        value.endsWith('.png') ||
+        value.endsWith('.gif') ||
+        value.endsWith('.bmp') ||
+        value.endsWith('.webp') ||
+        value.endsWith('.heic')
+      );
+    }
+
+    function updateDates(serviceDate, nextServiceDate) {
+      serviceDateEl.textContent = formatDate(serviceDate) || serviceDateEl.textContent;
+      nextDateEl.textContent = formatDate(nextServiceDate) || '待安排';
+    }
+
+    function formatDate(value) {
+      if (!value) return '';
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return '';
+        const isoCandidate = trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T');
+        const parsed = new Date(isoCandidate);
+        if (!Number.isNaN(parsed.getTime())) {
+          const y = parsed.getFullYear();
+          const m = String(parsed.getMonth() + 1).padStart(2, '0');
+          const d = String(parsed.getDate()).padStart(2, '0');
+          return `${y}年${m}月${d}日`;
+        }
+        if (trimmed.includes(' ')) {
+          const [y, m, d] = trimmed.split(' ')[0].split('-');
+          if (y && m && d) {
+            return `${y}年${m.padStart(2, '0')}月${d.padStart(2, '0')}日`;
+          }
+          return trimmed;
+        }
+        return trimmed;
+      }
+      try {
+        const date = new Date(value);
+        if (!Number.isNaN(date.getTime())) {
+          const y = date.getFullYear();
+          const m = String(date.getMonth() + 1).padStart(2, '0');
+          const d = String(date.getDate()).padStart(2, '0');
+          return `${y}年${m}月${d}日`;
+        }
+      } catch (error) {
+        /* ignore */
+      }
+      return '';
+    }
+
+    function renderError(text) {
+      slidesContainer.innerHTML = `<p>${text}</p>`;
+      updateDates(null, null);
+    }
+
+    function showOverlay(src) {
+      const overlay = document.getElementById('imageOverlay');
+      const overlayImg = document.getElementById('overlayImg');
+      overlayImg.src = src;
+      overlay.style.display = 'flex';
+    }
+
+    function hideOverlay() {
+      const overlay = document.getElementById('imageOverlay');
+      overlay.style.display = 'none';
+    }
+
+    function showVideoOverlay(src) {
+      const overlay = document.getElementById('videoOverlay');
+      const videoEl = document.getElementById('overlayVideo');
+      if (!videoEl) return;
+      videoEl.src = src;
+      overlay.style.display = 'flex';
+      setTimeout(() => {
+        try { videoEl.play(); } catch (e) {}
+      }, 0);
+    }
+
+    function hideVideoOverlay(event) {
+      if (event && event.target && event.target.id === 'overlayVideo') return;
+      const overlay = document.getElementById('videoOverlay');
+      const videoEl = document.getElementById('overlayVideo');
+      if (videoEl) {
+        try { videoEl.pause(); } catch (e) {}
+        videoEl.removeAttribute('src');
+      }
+      overlay.style.display = 'none';
+    }
+  </script>
+</body>
+</html>

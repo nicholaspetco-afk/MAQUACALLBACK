@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>跟進紀錄查詢</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="header">
+    <h1>跟進紀錄查詢</h1>
+  </header>
+  <main class="container">
+    <section class="card">
+      <h2 class="section-title">輸入客戶編碼</h2>
+      <form id="lookupForm" class="form-grid">
+        <label class="field-label" for="customerCodeRecord">客戶編碼</label>
+        <div class="field-inline">
+          <input id="customerCodeRecord" name="customerCodeRecord" class="text-input" placeholder="例如：C3770" required />
+          <button type="submit" class="primary-btn">查詢紀錄</button>
+        </div>
+      </form>
+      <div id="recordStatus" class="status-text"></div>
+    </section>
+
+    <section id="recordSection" class="card" hidden>
+      <h2 class="section-title">保養與跟進紀錄</h2>
+      <div id="recordList" class="records"></div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById('lookupForm');
+    const customerInput = document.getElementById('customerCodeRecord');
+    const statusEl = document.getElementById('recordStatus');
+    const sectionEl = document.getElementById('recordSection');
+    const listEl = document.getElementById('recordList');
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const code = customerInput.value.trim();
+      if (!code) {
+        statusEl.textContent = '請輸入客戶編碼。';
+        return;
+      }
+      statusEl.textContent = '查詢中，請稍候...';
+      sectionEl.hidden = true;
+      listEl.innerHTML = '';
+
+      try {
+        const response = await fetch(`/api/customers/${encodeURIComponent(code)}/followups`);
+        if (!response.ok) {
+          throw new Error(`查詢失敗 (${response.status})`);
+        }
+        const data = await response.json();
+        if (!Array.isArray(data.records) || data.records.length === 0) {
+          statusEl.textContent = '查無跟進紀錄。';
+          return;
+        }
+        renderRecords(data.records);
+        statusEl.textContent = '';
+        sectionEl.hidden = false;
+      } catch (error) {
+        console.error(error);
+        statusEl.textContent = '查詢時發生錯誤，請稍後再試。';
+      }
+    });
+
+    function renderRecords(records) {
+      listEl.innerHTML = '';
+      records.forEach((record, index) => {
+        const wrapper = document.createElement('article');
+        wrapper.className = 'record-card';
+
+        const header = document.createElement('div');
+        header.className = 'record-header';
+        header.innerHTML = `
+          <div>
+            <div class="record-title">紀錄 #${index + 1}</div>
+            <div class="record-dates">
+              <span>本次保養：${formatDate(record.serviceDate)}</span>
+              <span>下次保養：${formatDate(record.nextServiceDate)}</span>
+            </div>
+          </div>`;
+        wrapper.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'record-text';
+        const context = record.raw && (record.raw.followContextRichText || record.raw.followContext || '');
+        const followTime = record.raw && (record.raw.followTime || record.raw.createTime || '');
+        const engineer = record.raw && (record.raw.ower_name || record.raw.creator || '');
+        body.innerHTML = `
+          <p><strong>跟進時間：</strong>${formatDateTime(followTime)}</p>
+          <p><strong>負責人：</strong>${engineer || '—'}</p>
+          <p><strong>描述：</strong>${stripHtml(context) || '—'}</p>`;
+        wrapper.appendChild(body);
+
+        const gallery = document.createElement('div');
+        gallery.className = 'record-gallery';
+        const photos = Array.isArray(record.photos) && record.photos.length > 0
+          ? record.photos
+          : Array.isArray(record.files) ? record.files : [];
+
+        if (photos.length > 0) {
+          photos.forEach((file) => {
+            const img = document.createElement('img');
+            img.alt = file.fileName || '附件圖片';
+            img.loading = 'lazy';
+            img.src = file.fileUrl || '';
+            if (!file.fileUrl) {
+              img.classList.add('placeholder');
+              img.alt = `${file.fileName || '附件'}（暫無預覽連結）`;
+            }
+            gallery.appendChild(img);
+          });
+        } else {
+          const empty = document.createElement('p');
+          empty.className = 'empty-text';
+          empty.textContent = '此紀錄沒有附件。';
+          gallery.appendChild(empty);
+        }
+
+        wrapper.appendChild(gallery);
+        listEl.appendChild(wrapper);
+      });
+    }
+
+    function formatDate(value) {
+      if (!value) return '—';
+      try {
+        const date = new Date(value);
+        if (!Number.isNaN(date.getTime())) {
+          return date.toISOString().slice(0, 10);
+        }
+      } catch (error) {
+        return value;
+      }
+      if (typeof value === 'string') return value;
+      return '—';
+    }
+
+    function formatDateTime(value) {
+      if (!value) return '—';
+      try {
+        const date = new Date(value);
+        if (!Number.isNaN(date.getTime())) {
+          return date.toISOString().replace('T', ' ').slice(0, 16);
+        }
+      } catch (error) {
+        return value;
+      }
+      if (typeof value === 'string') return value;
+      return '—';
+    }
+
+    function stripHtml(value) {
+      if (!value || typeof value !== 'string') return value;
+      const temp = document.createElement('div');
+      temp.innerHTML = value;
+      return temp.textContent || temp.innerText || '';
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>客戶回訪報告查詢</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="header">
+    <h1>客戶回訪報告查詢</h1>
+  </header>
+  <main class="container">
+    <section class="card">
+      <h2 class="section-title">輸入客戶編碼</h2>
+      <p>輸入客戶編碼或聯絡電話，系統會自動從用友 CRM 取得最新的跟進紀錄照片與保養日期。若要手動覆寫日期，可在下方填寫。</p>
+      <form id="lookupForm" class="form-grid">
+        <label class="field-label" for="customerCode">客戶編碼</label>
+        <div class="field-inline">
+          <input id="customerCode" name="customerCode" class="text-input" placeholder="例如：C3770 或 28930055" required />
+          <button type="submit" class="primary-btn">查詢</button>
+        </div>
+        <fieldset class="manual-dates">
+          <legend>若要手動覆寫報告日期，請在此填寫（可留空）：</legend>
+          <label class="field-label" for="manualServiceDate">本次保養日期</label>
+          <input id="manualServiceDate" name="serviceDate" type="date" class="text-input" />
+          <label class="field-label" for="manualNextDate">下次保養日期</label>
+          <input id="manualNextDate" name="nextServiceDate" type="date" class="text-input" />
+        </fieldset>
+      </form>
+      <div id="lookupStatus" class="status-text"></div>
+      <div id="codeSuggestions" class="suggestion-box" hidden>
+        <p id="suggestionMessage" class="suggestion-text"></p>
+        <div id="suggestionButtons" class="suggestion-buttons"></div>
+      </div>
+    </section>
+
+    <section id="resultsSection" class="card" hidden>
+      <div class="section-header">
+        <h2 class="section-title">最新跟進紀錄</h2>
+        <button id="reportBtn" class="primary-btn">生成報告頁</button>
+      </div>
+      <div id="summaryBox" class="summary-box" hidden>
+        <div>
+          <p class="summary-label">客戶名稱</p>
+          <p id="summaryName" class="summary-name">—</p>
+        </div>
+        <div class="summary-dates">
+          <div>
+            <span class="summary-date-label">本次保養</span>
+            <span id="summaryLatest" class="summary-date-value">—</span>
+          </div>
+          <div>
+            <span class="summary-date-label">下次保養</span>
+            <span id="summaryNext" class="summary-date-value">—</span>
+          </div>
+        </div>
+      </div>
+      <div id="recordsContainer" class="records"></div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById('lookupForm');
+    const statusEl = document.getElementById('lookupStatus');
+    const customerCodeInput = document.getElementById('customerCode');
+    const manualServiceInput = document.getElementById('manualServiceDate');
+    const manualNextInput = document.getElementById('manualNextDate');
+    const resultsSection = document.getElementById('resultsSection');
+    const recordsContainer = document.getElementById('recordsContainer');
+    const reportBtn = document.getElementById('reportBtn');
+    const suggestionBox = document.getElementById('codeSuggestions');
+    const suggestionMessage = document.getElementById('suggestionMessage');
+    const suggestionButtons = document.getElementById('suggestionButtons');
+
+    let latestResponse = null;
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const code = customerCodeInput.value.trim().toUpperCase();
+      if (!code) {
+        statusEl.textContent = '請輸入客戶編碼。';
+        return;
+      }
+
+      statusEl.textContent = '查詢中，請稍候…';
+      resultsSection.hidden = true;
+      recordsContainer.innerHTML = '';
+        renderCodeSuggestions(null, null, [], null);
+
+      try {
+        const response = await fetch(`/api/customers/${encodeURIComponent(code)}/followups`);
+        if (!response.ok) {
+          throw new Error(`查詢失敗 (${response.status})`);
+        }
+        const data = await response.json();
+
+        const requestedCode = code.toUpperCase();
+        const resolvedCode = typeof data.resolvedCustomerCode === 'string'
+          ? data.resolvedCustomerCode.toUpperCase()
+          : null;
+        const searchMode = data.filterInfo && data.filterInfo.searchMode ? String(data.filterInfo.searchMode) : 'code';
+        const suggestions = Array.isArray(data.suggestedCodes)
+          ? Array.from(new Set(data.suggestedCodes.map((item) => String(item).toUpperCase())))
+          : [];
+        renderCodeSuggestions(requestedCode, resolvedCode, suggestions, searchMode);
+
+        if (!Array.isArray(data.records) || data.records.length === 0) {
+          if (suggestions.length > 0) {
+            if (searchMode === 'phone') {
+              statusEl.textContent = `電話 ${requestedCode} 查無完全符合的紀錄，請從建議清單中選擇。`;
+            } else {
+              statusEl.textContent = '查無完全符合的客戶，請從建議清單中選擇。';
+            }
+          } else {
+            statusEl.textContent = '查無跟進紀錄。請確認客戶編碼或稍後再試。';
+          }
+          latestResponse = null;
+          return;
+        }
+
+        if (resolvedCode && resolvedCode !== requestedCode) {
+          if (searchMode === 'phone') {
+            statusEl.textContent = `以電話 ${requestedCode} 找到客戶編碼 ${resolvedCode}，已顯示其紀錄。`;
+          } else {
+            statusEl.textContent = `找不到 ${requestedCode} 的紀錄，以下顯示 ${resolvedCode} 的資料。`;
+          }
+          customerCodeInput.value = resolvedCode;
+        } else {
+          statusEl.textContent = '';
+          customerCodeInput.value = requestedCode;
+        }
+
+        latestResponse = data;
+        const summaryData = data.summary || buildSummaryFromRaw(data);
+        applySummary(summaryData);
+        renderRecords(data.records, summaryData);
+        resultsSection.hidden = false;
+        statusEl.textContent = '';
+      } catch (error) {
+        console.error(error);
+        statusEl.textContent = '查詢時發生錯誤，請稍後再試。';
+        latestResponse = null;
+      }
+    });
+
+    reportBtn.addEventListener('click', () => {
+      if (!latestResponse) {
+        alert('請先查詢客戶資料。');
+        return;
+      }
+
+      try {
+        sessionStorage.setItem('reportData', JSON.stringify(latestResponse));
+      } catch (error) {
+        console.warn('無法儲存報告資料：', error);
+      }
+
+      const code = customerCodeInput.value.trim();
+      const params = new URLSearchParams({ customerCode: code });
+      if (manualServiceInput && manualServiceInput.value) {
+        params.set('serviceDate', manualServiceInput.value);
+      }
+      if (manualNextInput && manualNextInput.value) {
+        params.set('nextServiceDate', manualNextInput.value);
+      }
+
+      window.location.href = `report.html?${params.toString()}`;
+    });
+
+    function renderRecords(records, summary) {
+      recordsContainer.innerHTML = '';
+      const fallbackLatest = summary && summary.latestServiceDate ? normalizeInputDate(summary.latestServiceDate) : '';
+      const fallbackNext = summary
+        ? normalizeInputDate(summary.nextServiceDate || summary.previousServiceDate)
+        : '';
+
+      records.forEach((record, index) => {
+        const recordLatest = normalizeInputDate(record.serviceDate) || fallbackLatest;
+        const recordNext = normalizeInputDate(record.nextServiceDate) || fallbackNext;
+
+        const card = document.createElement('article');
+        card.className = 'record-card';
+
+        const header = document.createElement('div');
+        header.className = 'record-header';
+        header.innerHTML = `
+          <div>
+            <div class="record-title">跟進紀錄 #${index + 1}</div>
+            <div class="record-dates">
+              <span>本次保養：${formatDate(recordLatest)}</span>
+              <span>下次保養：${formatDate(recordNext)}</span>
+            </div>
+          </div>
+        `;
+        card.appendChild(header);
+
+        const gallery = document.createElement('div');
+        gallery.className = 'record-gallery';
+        const photos = Array.isArray(record.photos) && record.photos.length > 0
+          ? record.photos
+          : Array.isArray(record.files) ? record.files : [];
+
+        if (photos.length > 0) {
+          photos.forEach((file) => {
+            const img = document.createElement('img');
+            img.alt = file.fileName || '附件圖片';
+            img.loading = 'lazy';
+            img.src = file.fileUrl || '';
+            if (!file.fileUrl) {
+              img.classList.add('placeholder');
+              img.alt = `${file.fileName || '附件'}（暫無預覽連結）`;
+            }
+            gallery.appendChild(img);
+          });
+        } else {
+          const empty = document.createElement('p');
+          empty.className = 'empty-text';
+          empty.textContent = '此紀錄沒有附件。';
+          gallery.appendChild(empty);
+        }
+
+        card.appendChild(gallery);
+        recordsContainer.appendChild(card);
+      });
+    }
+
+    function formatDate(value) {
+      if (!value) return '—';
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return '—';
+        const isoCandidate = trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T');
+        const parsed = new Date(isoCandidate);
+        if (!Number.isNaN(parsed.getTime())) {
+          return parsed.toISOString().slice(0, 10);
+        }
+        if (trimmed.includes(' ')) {
+          return trimmed.split(' ')[0];
+        }
+        return trimmed;
+      }
+      try {
+        const date = new Date(value);
+        if (!Number.isNaN(date.getTime())) {
+          return date.toISOString().slice(0, 10);
+        }
+      } catch (error) {
+        /* ignore */
+      }
+      return '—';
+    }
+
+    function applySummary(summary) {
+      const summaryBox = document.getElementById('summaryBox');
+      const summaryNameEl = document.getElementById('summaryName');
+      const summaryLatestEl = document.getElementById('summaryLatest');
+      const summaryNextEl = document.getElementById('summaryNext');
+
+      if (summaryBox) summaryBox.hidden = true;
+      if (summaryNameEl) summaryNameEl.textContent = '—';
+      if (summaryLatestEl) summaryLatestEl.textContent = '—';
+      if (summaryNextEl) summaryNextEl.textContent = '—';
+
+      if (!summary || typeof summary !== 'object') return;
+
+      const latest = summary.latestServiceDate ? normalizeInputDate(summary.latestServiceDate) : '';
+      const next = summary.nextServiceDate ? normalizeInputDate(summary.nextServiceDate) : '';
+      const previous = summary.previousServiceDate ? normalizeInputDate(summary.previousServiceDate) : '';
+      const resolvedNext = next || previous;
+
+      if (manualServiceInput) manualServiceInput.value = latest;
+      if (manualNextInput) manualNextInput.value = resolvedNext;
+
+      const hasInfo = Boolean(summary.customerName || latest || resolvedNext);
+      if (hasInfo && summaryBox) {
+        summaryBox.hidden = false;
+        if (summaryNameEl) summaryNameEl.textContent = summary.customerName || '—';
+        if (summaryLatestEl) summaryLatestEl.textContent = formatDate(latest);
+        if (summaryNextEl) summaryNextEl.textContent = formatDate(resolvedNext);
+      }
+    }
+
+    function buildSummaryFromRaw(data) {
+      try {
+        const recordList = (data.raw?.data?.recordList || []).slice();
+        if (!recordList.length) return null;
+        const maintenance = recordList.filter(item => String(item.ower_name || '').includes('維修幫'));
+        const source = maintenance.length ? maintenance : recordList;
+        source.sort((a, b) => new Date(b.followTime || 0) - new Date(a.followTime || 0));
+        const latest = source[0];
+        const previous = source[1];
+        const latestDate = normalizeInputDate(latest?.followTime);
+        const previousDate = normalizeInputDate(previous?.followTime);
+        return {
+          customerCode: data.customerCode || latest?.customer_code || latest?.customer_name || null,
+          customerName: latest?.customer_name || latest?.customer_code || null,
+          latestServiceDate: latestDate,
+          previousServiceDate: previousDate,
+          nextServiceDate: previousDate,
+        };
+      } catch (error) {
+        console.warn('Failed to build summary from raw data', error);
+        return null;
+      }
+    }
+
+    function normalizeInputDate(value) {
+      if (!value) return '';
+      const text = String(value).trim();
+      if (!text) return '';
+      const isoCandidate = text.includes('T') ? text : text.replace(' ', 'T');
+      const parsed = new Date(isoCandidate);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString().slice(0, 10);
+      }
+      if (text.includes(' ')) {
+        return text.split(' ')[0];
+      }
+      return text;
+    }
+
+    function renderCodeSuggestions(requested, resolved, suggestions, mode) {
+      suggestionButtons.innerHTML = '';
+
+      if (!Array.isArray(suggestions) || suggestions.length === 0) {
+        suggestionBox.hidden = true;
+        suggestionMessage.textContent = '';
+        return;
+      }
+
+      const requestedLabel = requested ? requested.toUpperCase() : '';
+      const resolvedLabel = resolved ? resolved.toUpperCase() : null;
+
+      const searchMode = mode || 'code';
+
+      if (resolvedLabel && resolvedLabel !== requestedLabel) {
+        if (searchMode === 'phone') {
+          suggestionMessage.textContent = `電話 ${requestedLabel} 對應以下客戶，請選擇要查看的編碼：`;
+        } else {
+          suggestionMessage.textContent = `輸入的 ${requestedLabel} 無資料，已找到以下類似客戶：`;
+        }
+      } else if (requestedLabel) {
+        if (searchMode === 'phone') {
+          suggestionMessage.textContent = `電話 ${requestedLabel} 對應多筆客戶，請選擇編碼：`;
+        } else {
+          suggestionMessage.textContent = `找不到 ${requestedLabel}，請改選以下客戶編碼：`;
+        }
+      } else {
+        suggestionMessage.textContent = '請選擇客戶編碼：';
+      }
+
+      suggestions.forEach((candidate) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'suggestion-btn';
+        btn.textContent = candidate;
+        btn.addEventListener('click', () => {
+          customerCodeInput.value = candidate;
+          form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        });
+        suggestionButtons.appendChild(btn);
+      });
+
+      suggestionBox.hidden = false;
+    }
+  </script>
+</body>
+</html>
