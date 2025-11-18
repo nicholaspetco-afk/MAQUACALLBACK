@@ -48,6 +48,11 @@ def members_style() -> Any:  # pragma: no cover - static file helper
     return send_from_directory(str(ROOT_DIR / "MAQUA會員制"), "members.css")
 
 
+@app.route("/0f27d5836b32127724873f9002754f91.txt")
+def wechat_verify() -> Any:  # pragma: no cover - static file helper
+    return send_from_directory(ROOT_DIR, "0f27d5836b32127724873f9002754f91.txt")
+
+
 @app.route("/style.css")
 def style_file() -> Any:  # pragma: no cover - static file helper
     return send_from_directory(ROOT_DIR, "style.css")
