@@ -67,6 +67,8 @@
   </div>
 
   <script>
+    // Use absolute API base so the report works from WeChat static hosting and the Render-served version.
+    const API_BASE = window.API_BASE_URL || 'https://maquacallback.onrender.com';
     const slidesContainer = document.getElementById('slidesContainer');
     const serviceDateEl = document.getElementById('serviceDateValue');
     const nextDateEl = document.getElementById('nextDateValue');
@@ -95,7 +97,7 @@
 
       if (!payload) {
         try {
-          const response = await fetch(`/api/customers/${encodeURIComponent(customerCode)}/followups`);
+          const response = await fetch(`${API_BASE}/api/customers/${encodeURIComponent(customerCode)}/followups`);
           if (!response.ok) {
             throw new Error(`查詢失敗 (${response.status})`);
           }

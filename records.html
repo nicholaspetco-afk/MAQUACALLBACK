@@ -30,6 +30,8 @@
   </main>
 
   <script>
+    // Absolute API base keeps the page working on WeChat static hosting while still functioning on Render-hosted pages.
+    const API_BASE = window.API_BASE_URL || 'https://maquacallback.onrender.com';
     const form = document.getElementById('lookupForm');
     const customerInput = document.getElementById('customerCodeRecord');
     const statusEl = document.getElementById('recordStatus');
@@ -48,7 +50,7 @@
       listEl.innerHTML = '';
 
       try {
-        const response = await fetch(`/api/customers/${encodeURIComponent(code)}/followups`);
+        const response = await fetch(`${API_BASE}/api/customers/${encodeURIComponent(code)}/followups`);
         if (!response.ok) {
           throw new Error(`查詢失敗 (${response.status})`);
         }

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from flask import Flask, jsonify, request, send_from_directory, send_file
+from flask_cors import CORS
 
 try:
     import server.config as config  # type: ignore
@@ -21,6 +22,12 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 
 app = Flask(__name__)
 app.logger.setLevel("DEBUG")
+
+# Enable CORS for API endpoints to support the "WeChat cloud static frontend + Render backend" deployment.
+# In production, set CORS_ORIGINS to the specific WeChat static site domain (e.g., https://xxx.servicewechat.com).
+# During development, the default "*" allows cross-origin calls for easier testing.
+allowed_origins = os.getenv("CORS_ORIGINS", "*")
+CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
 
 
 @app.route("/")

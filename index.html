@@ -61,6 +61,8 @@
   </main>
 
   <script>
+    // API base points to the Render backend; keep absolute URL so the same frontend works on WeChat static hosting or directly on Render.
+    const API_BASE = window.API_BASE_URL || 'https://maquacallback.onrender.com';
     const form = document.getElementById('lookupForm');
     const statusEl = document.getElementById('lookupStatus');
     const customerCodeInput = document.getElementById('customerCode');
@@ -89,7 +91,7 @@
         renderCodeSuggestions(null, null, [], null);
 
       try {
-        const response = await fetch(`/api/customers/${encodeURIComponent(code)}/followups`);
+        const response = await fetch(`${API_BASE}/api/customers/${encodeURIComponent(code)}/followups`);
         if (!response.ok) {
           throw new Error(`查詢失敗 (${response.status})`);
         }
